@@ -47,7 +47,7 @@ export async function processNextJob() {
   await updateStatus(job.id, Status.inProgress);
 
   // Here we use a child process to isolate the job processor
-  const jobProcessor = spawn("node", ["./src/videoProcessor.js", job.id]); // Adjust the command as needed
+  const jobProcessor = spawn("node", ["./src/domain/videoProcessor.ts", job.id]); // Adjust the command as needed
 
   // Handling stdout and stderr of the child process
   jobProcessor.stdout.on("data", (data) => {

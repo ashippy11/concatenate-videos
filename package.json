@@ -1,6 +1,7 @@
 {
   "name": "concatenate-videos",
   "version": "1.0.0",
+  "type": "module",
   "description": "A service for concatenating videos",
   "main": "index.js",
   "scripts": {
