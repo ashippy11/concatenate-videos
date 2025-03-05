@@ -1,6 +1,12 @@
 # Use the official Node.js image
 FROM node:16-slim
 
+# Set default value for NODE_ENV to 'development'
+ARG NODE_ENV=development
+
+# Set the environment variable to NODE_ENV
+ENV NODE_ENV=${NODE_ENV}
+
 # Install ffmpeg dependency
 RUN apt-get update && apt-get install -y \
   ffmpeg \

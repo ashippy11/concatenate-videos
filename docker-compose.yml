@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  concatenate-vidoes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: development  # This sets the build argument
+    environment:
+    - NODE_ENV=development
+    ports:
+    - "8000:8000"
+    restart: always

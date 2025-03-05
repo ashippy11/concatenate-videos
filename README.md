@@ -2,19 +2,15 @@
 
 ### Running the application
 
-OS-level Dependencies:
+Run the docker container locally:
 
 ```
-brew install ffmpeg
-```
-
-Start the api and background job processor
+docker-compose up --build
 
 ```
-npm start
-```
 
-api runs on port 8000
+Container is mapped to port 8000
+
 
 ### API Call Flow
 

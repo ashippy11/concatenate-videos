@@ -63,7 +63,7 @@ jobs:
 
     - name: Build and push Docker image to ECR
       run: |
-        docker build -t your-app-name .
+        docker build -t NODE_ENV=production your-app-name .
         docker tag your-app-name:latest <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/your-repository-name:production-${{ github.sha }}
         docker push <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/your-repository-name:latest
 
@@ -78,5 +78,9 @@ jobs:
           docker stop concatenate-vidoes || true
           docker rm concatenate-vidoes || true
           # Pull the image from ECR and run
-          docker pull <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/your-repository-name:production-${{ github.sha }}
-          docker run -d --name your-app-container -p 80:8000 <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/your-repository-name:production-${{ github.sha }}
+          docker pull <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/concatenate_video_service:production-${{ github.sha }}
+          docker run -d -v /mnt/job_data:/mnt/job_data \
+            --log-driver=awslogs \
+            --log-opt awslogs-group=/ec2/concatenate-video-service \
+            --log-opt awslogs-stream=${{ secrets.EC2_HOST }}   \
+            --name concatenate_video_service -p 80:8000 <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com/concatenate_video_service:production-${{ github.sha }}

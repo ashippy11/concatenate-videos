@@ -1,0 +1,73 @@
+Known Issues (In Priority Order)
+1. Local Development Dependency Mismatch
+    Problem: Local development requires installing a disruptive dependency (ffmpeg) on each developer’s machine, leading to potential parity mismatches between the local environment and the production instance.
+    Solution: To address this, the application was Dockerized. This approach ensures that developers run the same environment locally as in production, eliminating dependency mismatch issues.
+              Developers can easily build and run the container locally with the docker-compose file that was added by running "docker-compose up --build"
+
+2. Low Deployment Frequency
+    Problem: Deployment is slow and manual, requiring developers to manually build, SSH into an EC2 instance, and start the service. Engineers are hesitant
+             because they are accustomed to more modern continuous deployment solutions.
+    Solution: Automate the deployment process with a gitlab Action workflow to streamline the process. When there is a commit pushed to the main branch the deploy.yml file will run in Gitlab
+              This pipeline first applies Terraform so we can keep all infra and code in the same place. Then a docker image is built, pushed to ECR, and then the EC2 instance is sshd into and
+              the image is pulled and ran. Any secret values will be pulled in from github's "Actions secrets and variables."
+
+3. Loss of Jobs on EC2 Restart
+    Problem: Whenever the EC2 instance is restarted, all jobs are lost.
+    Solution: In order to tackle this issue, jobs need to be kept in a persistent storage. Some options could include splitting the API and job processor into different
+              microservices entirely. The API could write Jobs to a Queue (like SQS) and then the job processor could be ran in a separate environment (Lambda, ECS are options)
+              and process jobs from the queue. This architecture has some advantages when it comes to scaling and what the availability requirements are for this service. If
+              the API and job processor needed to be scaled independently, for example if there are a lot of requests to process jobs, but few requests to get a jobs status, then the
+              job processor could be scaled. Implementing a Queue also allows the application to be scaled based on the number of jobs to process instead of just resource utilization like CPU/Memory
+              When everything is running in one EC2 instance it may be the case the jobs are piling up, but the CPU and memory are staying stable and there is no indication that we woudl need to scale the
+              job processor horizontally. The drawback with this architecture of implementing a cloud hosted queue  is it makes local development and testing end to end more difficult.
+              There are ways around this and AWS cloud services can be mocked by using something like LocalStack, but I chose a simpler approach that could be completed in the aloted time
+
+              Persisting Job Data on an EBS volume. This means that even when teh EC2 instance is restarted, job repository data will not be lost. To do this I Terraformed a EBS volume and
+              attatched it to the EC2 instance with a script at start up. When the container is ran on the EC2 instance the -volume flag is used to map the instance mount to the container.
+              In order for this not to effect local development I created an Environment variable in the Dockerfile called NODE_ENV
+              which is set to "Production" when the image is built in the github workflow, but set to development when the image is build with the docker-compose.yml. The NODE_ENV sets the
+              JOBS_DIRECTORY variable in the jobRepository.ts where each function has been updated to save jobs in that location instead of in the job array which was in memory. This makes sure
+              that developers don't have extra requirements when running locally of a file system mounted at /mnt.
+
+              Note: If we needed to scale this process horizontally I would have used an EFS volume instead so It could be mounted onto multiple EC2 instances in an autoscaling group
+
+4. Lack of Infrastructure Knowledge and Local Setup
+    Problem: Developers lack knowledge of the infrastructure configuration, and there's an assumption that all services and supporting infrastructure can run locally.
+    Solution: Some of this was already discussed above but I have made sure that all changes don't effect the local development experience.
+
+5. API Crashes with Job Processor
+    Problem: When the job processor crashes, the entire API goes down with it.
+    Solution: This would also be fixed if the architecture were updated to split the API and job processor into seperate microserves with a queue but since I am trying to keep
+              everything on the 1 EC2 instance for local development and time's sake to address that I made use of Nodes child process. I refactored the job processing logic
+              so that the video processing task runs in a separate child process. This prevents the main API from crashing if the video processing fails or encounters an error.
+
+7. Slow Mean Time To Resolve (MTTR)
+    Problem: The mean time to resolve issues is around a day due to a lack of observability and monitoring. The sparse logs available are difficult to interpret, leaving the team in a reactive position.
+    Solution: I implemented some logging of this application by running the container on the EC2 instance with the following arguments:
+                --log-driver=awslogs \
+                --log-opt awslogs-group=/ec2/concatenate-video-service \
+                --log-opt awslogs-stream={instance_id} \
+              Since the API and the job processor are running in the same application still and we have little visibility into the number of jobs that are being
+              processed and if there is any build up of jobs, we could implement some kind of metric gathering agent into the application. I have experience with DataDog
+              for custom Metircs and the DD agent could be ran as a side car container and then there could be places added in the code to get a custom metrics like the number of jobs in the
+              job repository. This is another reason it could be better long term though to actually split the job processor and API into separate microservices with a queue in between
+              Then it would be very easy to get metrics from the Queue
+
+
+Extra Time:
+
+- file persistence - both the source files and merged files are stored on the local machine at the provided path. This needs to change for obvious reasons.
+  Update to properly download files to a more robust storage solution for merging and to place the merged output into an s3 bucket (you can remove the [`desitnation.directory`](http://desitnation.directory) parameter)
+
+  Solution: I did not get to this but what I would have done is the following
+   1. Terraform a S3 bucket and and add to the IAM policy for the EC2 instance to PutObjects in that S3 bucket,
+   2. Update in videoProcessor the writeFile() function to use the AWS S3 JavaScript SDK https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html to write files to S3 instead of to disk
+   3. Discuss with developers if they would like local development to just store files locally or if developers want to configure local AWS credentials in order to run the app and store them in S3
+      Depending on the anser the storing in S3 could be controlled by the NODE_ENV variable.
+
+
+- fairness - there is no segmentation of jobs from different callers and one caller could cause significant delays for other callers (assume callers IP address is enough to segment)
+
+    1. If people are abusing the application a WAF could be put in front of the application to Rate Limit by IP
+
+
