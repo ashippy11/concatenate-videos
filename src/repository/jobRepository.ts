@@ -2,6 +2,11 @@ import { Job, Status } from "../domain/model/job";
 import * as fs from 'fs';
 import * as path from 'path';
 
+//Instead of keeping Job objects in-memory we are writing them to a file on an EBS volume- there are some
+//potential scaling issues here as storing jobs as individual files on EBS and querying them by reading
+//all files can become inefficient as the number of jobs grows, if given more time I would have used something like
+//DynamoDB which would be quicker to index for jobs IDs and if we needed to scale the application with multiple
+//instances then there would not be an I/O throughput issue like there could be with the EBS or EFS volume
 
 // Use environment variable to determine the directory, for production use the EBS Volume path, on local use a tmp directory path
 const JOBS_DIRECTORY = process.env.NODE_ENV === "production"
@@ -13,18 +18,15 @@ if (!fs.existsSync(JOBS_DIRECTORY)) {
   fs.mkdirSync(JOBS_DIRECTORY, { recursive: true });
 }
 
-// Helper function to get the job file path
 function getJobFilePath(id: string): string {
   return path.join(JOBS_DIRECTORY, `${id}.json`);
 }
 
-// Function to save job to the EBS volume
 export function saveJob(job: Job) {
   const jobFilePath = getJobFilePath(job.id);
   fs.writeFileSync(jobFilePath, JSON.stringify(job, null, 2)); // Store job data in JSON format
 }
 
-// Function to load a job from the EBS volume
 export function getJob(id: string): Job | undefined {
   const jobFilePath = getJobFilePath(id);
   if (fs.existsSync(jobFilePath)) {
@@ -34,7 +36,6 @@ export function getJob(id: string): Job | undefined {
   return undefined;
 }
 
-// Function to get the next pending job
 export function getNextPendingJob(): Job | undefined {
   const files = fs.readdirSync(JOBS_DIRECTORY);
   for (const file of files) {
@@ -47,7 +48,6 @@ export function getNextPendingJob(): Job | undefined {
   return undefined;
 }
 
-// Function to update job status on EBS volume
 export function updateStatus(id: string, status: Status) {
   const job = getJob(id);
   if (!job) {

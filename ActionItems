@@ -1,7 +1,7 @@
 Known Issues (In Priority Order)
 1. Local Development Dependency Mismatch
     Problem: Local development requires installing a disruptive dependency (ffmpeg) on each developer’s machine, leading to potential parity mismatches between the local environment and the production instance.
-    Solution: To address this, the application was Dockerized. This approach ensures that developers run the same environment locally as in production, eliminating dependency mismatch issues.
+    Solution: To address this, the application was Dockerized. This approach ensures that developers run the same environment locally as in production, eliminating dependency mismatch issues and the need to install ffmpeg
               Developers can easily build and run the container locally with the docker-compose file that was added by running "docker-compose up --build"
 
 2. Low Deployment Frequency
@@ -15,21 +15,29 @@ Known Issues (In Priority Order)
     Problem: Whenever the EC2 instance is restarted, all jobs are lost.
     Solution: In order to tackle this issue, jobs need to be kept in a persistent storage. Some options could include splitting the API and job processor into different
               microservices entirely. The API could write Jobs to a Queue (like SQS) and then the job processor could be ran in a separate environment (Lambda, ECS are options)
-              and process jobs from the queue. This architecture has some advantages when it comes to scaling and what the availability requirements are for this service. If
-              the API and job processor needed to be scaled independently, for example if there are a lot of requests to process jobs, but few requests to get a jobs status, then the
-              job processor could be scaled. Implementing a Queue also allows the application to be scaled based on the number of jobs to process instead of just resource utilization like CPU/Memory
-              When everything is running in one EC2 instance it may be the case the jobs are piling up, but the CPU and memory are staying stable and there is no indication that we woudl need to scale the
-              job processor horizontally. The drawback with this architecture of implementing a cloud hosted queue  is it makes local development and testing end to end more difficult.
-              There are ways around this and AWS cloud services can be mocked by using something like LocalStack, but I chose a simpler approach that could be completed in the aloted time
+              and process jobs from the queue. For keeping track of the Job Status a NOSQL DB like DocumentDB could be used. This architecture has some advantages when it comes to scaling
+              depending on availability requirements are for this service. If the API and job processor needed to be scaled independently, for example if there are a lot of requests to process jobs,
+              but few requests to get a jobs status, then the job processor could be scaled. Implementing a Queue also allows the application to be scaled based on the number of jobs to process
+              instead of just resource utilization like CPU/Memory.
+              When everything is running in one EC2 instance it may be the case the jobs are piling up, but the CPU and memory are staying stable and there is no indication that we would need to scale the
+              job processor horizontally.
+              The drawback with this architecture of implementing a cloud hosted queue/DB is it makes local development and testing end to end more difficult.
+              There are ways around this and AWS cloud services can be mocked by using something like LocalStack, or we could run a queue service like rabbitMQ in a local container
+               but I chose a simpler approach that could be completed in the allotted time
 
-              Persisting Job Data on an EBS volume. This means that even when teh EC2 instance is restarted, job repository data will not be lost. To do this I Terraformed a EBS volume and
-              attatched it to the EC2 instance with a script at start up. When the container is ran on the EC2 instance the -volume flag is used to map the instance mount to the container.
+              I chose to persist Job Data on an EBS volume. This means that even when the EC2 instance is restarted, job repository data will not be lost. To do this I Terraformed a EBS volume and
+              attached it to the EC2 instance with a script at start up. When the container is ran on the EC2 instance the -volume flag is used to map the instance mount to the container.
               In order for this not to effect local development I created an Environment variable in the Dockerfile called NODE_ENV
               which is set to "Production" when the image is built in the github workflow, but set to development when the image is build with the docker-compose.yml. The NODE_ENV sets the
-              JOBS_DIRECTORY variable in the jobRepository.ts where each function has been updated to save jobs in that location instead of in the job array which was in memory. This makes sure
+              JOBS_DIRECTORY variable in the jobRepository.ts where each function has been updated to save jobs in that location in a file format instead of in the job array which was in memory. This makes sure
               that developers don't have extra requirements when running locally of a file system mounted at /mnt.
 
-              Note: If we needed to scale this process horizontally I would have used an EFS volume instead so It could be mounted onto multiple EC2 instances in an autoscaling group
+              Note: If we needed to scale this process horizontally I would have used an EFS volume instead so It could be mounted onto multiple EC2 instances in an autoscaling group, but both of these
+              approaches have some potential scaling issues. Storing jobs as individual files on EBS and querying them by reading all files can become inefficient as the number of jobs grows,
+              if given more time I would have used something like DynamoDB which would be quicker to index for jobs IDs and if we needed to scale the application with multiple
+              instances then there would not be an I/O throughput issue like there could be with the EBS or EFS volume. For local development there is a downloadable version of DynamoDB that you can run on
+              your local machine. It would allow devs to simulate the behavior of DynamoDB without needing to interact with the actual AWS infrastructure and could be ran as a container with docker compose.
+
 
 4. Lack of Infrastructure Knowledge and Local Setup
     Problem: Developers lack knowledge of the infrastructure configuration, and there's an assumption that all services and supporting infrastructure can run locally.
@@ -37,10 +45,10 @@ Known Issues (In Priority Order)
 
 5. API Crashes with Job Processor
     Problem: When the job processor crashes, the entire API goes down with it.
-    Solution: This would also be fixed if the architecture were updated to split the API and job processor into seperate microserves with a queue but since I am trying to keep
-              everything on the 1 EC2 instance for local development and time's sake to address that I made use of Nodes child process. I refactored the job processing logic
-              so that the video processing task runs in a separate child process. This prevents the main API from crashing if the video processing fails or encounters an error.
-
+    Solution: This would also be fixed if the architecture were updated to split the API and job processor into separate microservices with a queue/NoSQL DB but since I am trying to keep
+              everything on the 1 EC2 instance for local development and time's sake to address that I made use of Nodes child process so the job processor are spawned on different threads.
+              This prevents the main API from crashing if the video processing fails or encounters an error. There are scaling concerns with this approach as well as if there are many requests
+              to the API at a time then many threads could be spawned causing spikes of CPU utilization on the EC2 instance.
 7. Slow Mean Time To Resolve (MTTR)
     Problem: The mean time to resolve issues is around a day due to a lack of observability and monitoring. The sparse logs available are difficult to interpret, leaving the team in a reactive position.
     Solution: I implemented some logging of this application by running the container on the EC2 instance with the following arguments:
@@ -52,6 +60,14 @@ Known Issues (In Priority Order)
               for custom Metircs and the DD agent could be ran as a side car container and then there could be places added in the code to get a custom metrics like the number of jobs in the
               job repository. This is another reason it could be better long term though to actually split the job processor and API into separate microservices with a queue in between
               Then it would be very easy to get metrics from the Queue
+    For this to production ready I would have also added some monitoring on the EC2 instance around CPU and memory and alerts when those spiked. If these alerts
+    were going off frequently there would be a few more options for scaling
+
+    1. If we wanted to keep the application on an EC2 instance and not break into microservices then we could create an autoscaling group with a shared EFS volume mounted
+       to all of the instances so they all had access to the filesystem of jobs. CLoud watch alarms could be configured to add instances to the autoscaling group during CPU spikes.
+    2. If we were going to split the application into microservcies and implement DynamoDB/SQS we could host the API and workers on ECS as two separate services and also use cloudwatch alarms for scaling,
+       this would allow us to scale the two services independently. We could even create custom cloudwatch alerts when the queue has over certain number of requests and scale up the video processor containers
+       based on that metric. 
 
 
 Extra Time:
@@ -65,9 +81,12 @@ Extra Time:
    3. Discuss with developers if they would like local development to just store files locally or if developers want to configure local AWS credentials in order to run the app and store them in S3
       Depending on the anser the storing in S3 could be controlled by the NODE_ENV variable.
 
-
 - fairness - there is no segmentation of jobs from different callers and one caller could cause significant delays for other callers (assume callers IP address is enough to segment)
 
     1. If people are abusing the application a WAF could be put in front of the application to Rate Limit by IP
+    2. Queues could be implemented to IP specific - Id' have some questions about the types of users to determine how the separate
+        queues should be serviced by the job processor workers. Are some users jobs more urgent than others for example? A priority could
+        be assigned to certain queues, or the workers could pick up from the queue in a round-robin style so that even if a user puts
+        a bunch of requests at once they don't all get picked up at once ahead of other requests.
 
 
